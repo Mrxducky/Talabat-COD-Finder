@@ -59,6 +59,8 @@ fun MainScreen(viewModel: RiderViewModel) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
 
+    var selectedMachineForNavigation by remember { mutableStateOf<com.example.model.CODMachine?>(null) }
+
     // Request permissions launcher
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
@@ -157,13 +159,133 @@ fun MainScreen(viewModel: RiderViewModel) {
             Spacer(modifier = Modifier.height(20.dp))
 
             // Nearest Machine Focus
-            NearestMachineCard(state, context)
+            NearestMachineCard(state) { machine ->
+                selectedMachineForNavigation = machine
+            }
 
             Spacer(modifier = Modifier.height(20.dp))
 
             // All Machines Directory List
-            DropMachinesList(state, context)
+            DropMachinesList(state) { machine ->
+                selectedMachineForNavigation = machine
+            }
         }
+    }
+
+    if (selectedMachineForNavigation != null) {
+        val machine = selectedMachineForNavigation!!
+        AlertDialog(
+            onDismissRequest = { selectedMachineForNavigation = null },
+            title = {
+                Column {
+                    Text(
+                        text = "High-Precision Turn Navigation",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp,
+                        color = Color.White
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "${machine.name} (${machine.branch})",
+                        fontSize = 13.sp,
+                        color = Color.LightGray
+                    )
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "Choose your preferred routing application below to begin step-by-step turn guidance from your current location directly to this drop spot.",
+                        fontSize = 13.sp,
+                        color = Color.Gray,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+
+                    // 1. Waze Button
+                    Button(
+                        onClick = {
+                            launchWaze(context, machine.latitude, machine.longitude, machine.mapUrl)
+                            selectedMachineForNavigation = null
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF33D1FF), // Waze blue
+                            contentColor = Color.Black
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().height(48.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Navigation,
+                                contentDescription = "Waze",
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Navigate with Waze", fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    // 2. Google Maps Button
+                    Button(
+                        onClick = {
+                            launchGoogleMaps(context, machine.latitude, machine.longitude, machine.mapUrl)
+                            selectedMachineForNavigation = null
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFEF4444), // Crimson primary accent
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().height(48.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Map,
+                                contentDescription = "Google Maps",
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Navigate with Google Maps", fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    // 3. Original Merchant Link Button
+                    OutlinedButton(
+                        onClick = {
+                            launchMerchantUrl(context, machine.mapUrl)
+                            selectedMachineForNavigation = null
+                        },
+                        border = BorderStroke(1.dp, Color(0xFF334155)),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = Color.LightGray
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().height(48.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Link,
+                                contentDescription = "Original Merchant Link",
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Open Original Merchant Link", fontSize = 13.sp)
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { selectedMachineForNavigation = null }) {
+                    Text("Cancel", color = Color.Gray)
+                }
+            },
+            containerColor = Color(0xFF1E293B),
+            shape = RoundedCornerShape(20.dp)
+        )
     }
 }
 
@@ -893,7 +1015,7 @@ fun InteractiveQatarRadarCanvas(state: RiderState, viewModel: RiderViewModel) {
 }
 
 @Composable
-fun NearestMachineCard(state: RiderState, context: Context) {
+fun NearestMachineCard(state: RiderState, onNavigate: (CODMachine) -> Unit) {
     val nearestPair = state.nearestMachine
 
     if (nearestPair != null) {
@@ -938,7 +1060,7 @@ fun NearestMachineCard(state: RiderState, context: Context) {
                         )
                         Text(
                             text = machine.name,
-                            fontSize = 20.sp,
+                            fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
                         )
@@ -947,6 +1069,21 @@ fun NearestMachineCard(state: RiderState, context: Context) {
                             fontSize = 13.sp,
                             color = Color.LightGray
                         )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = Color(0xFF0F172A),
+                            border = BorderStroke(1.dp, Color(0xFF334155))
+                        ) {
+                            Text(
+                                text = "MERCHANT ID: ${machine.merchantId}",
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFF59E0B),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                            )
+                        }
                     }
                 }
 
@@ -978,7 +1115,7 @@ fun NearestMachineCard(state: RiderState, context: Context) {
 
                     Button(
                         onClick = {
-                            launchMapsNavigation(context, machine)
+                            onNavigate(machine)
                         },
                         shape = RoundedCornerShape(14.dp),
                         colors = ButtonDefaults.buttonColors(
@@ -1004,7 +1141,7 @@ fun NearestMachineCard(state: RiderState, context: Context) {
 }
 
 @Composable
-fun DropMachinesList(state: RiderState, context: Context) {
+fun DropMachinesList(state: RiderState, onNavigate: (CODMachine) -> Unit) {
     Card(
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
@@ -1030,7 +1167,7 @@ fun DropMachinesList(state: RiderState, context: Context) {
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
-                                launchMapsNavigation(context, machine)
+                                onNavigate(machine)
                             }
                             .padding(vertical = 12.dp)
                             .testTag("machine_row_${machine.name.take(5)}"),
@@ -1085,6 +1222,14 @@ fun DropMachinesList(state: RiderState, context: Context) {
                                 fontSize = 12.sp,
                                 color = Color.Gray
                             )
+                            Spacer(modifier = Modifier.height(3.dp))
+                            Text(
+                                text = "MERCHANT ID: ${machine.merchantId}",
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF38BDF8)
+                            )
                         }
 
                         Column(
@@ -1117,23 +1262,50 @@ fun DropMachinesList(state: RiderState, context: Context) {
     }
 }
 
-// Launches navigation link on Google Maps or standard handler application
-private fun launchMapsNavigation(context: Context, machine: CODMachine) {
+// Launches navigation link on Waze directly with fallback options
+private fun launchWaze(context: Context, latitude: Double, longitude: Double, fallbackUrl: String) {
     try {
-        val gmmIntentUri = Uri.parse("google.navigation:q=${machine.latitude},${machine.longitude}")
-        val mapIntent = Intent(Intent.ACTION_VIEW, gmmIntentUri).apply {
+        val wazeUri = "waze://?ll=$latitude,$longitude&navigate=yes"
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(wazeUri))
+        context.startActivity(intent)
+    } catch (e: Exception) {
+        try {
+            val webWaze = "https://waze.com/ul?ll=$latitude,$longitude&navigate=yes"
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(webWaze))
+            context.startActivity(intent)
+        } catch (ex: Exception) {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(fallbackUrl))
+            context.startActivity(intent)
+        }
+    }
+}
+
+// Launches navigation link on Google Maps directly with standard backup option
+private fun launchGoogleMaps(context: Context, latitude: Double, longitude: Double, fallbackUrl: String) {
+    try {
+        val gmapsUri = "google.navigation:q=$latitude,$longitude"
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(gmapsUri)).apply {
             setPackage("com.google.android.apps.maps")
         }
-        if (mapIntent.resolveActivity(context.packageManager) != null) {
-            context.startActivity(mapIntent)
-        } else {
-            // Fallback to launching the browser URL direct maps link safely
-            val webIntent = Intent(Intent.ACTION_VIEW, Uri.parse(machine.mapUrl))
-            context.startActivity(webIntent)
-        }
+        context.startActivity(intent)
     } catch (e: Exception) {
-        val webIntent = Intent(Intent.ACTION_VIEW, Uri.parse(machine.mapUrl))
-        context.startActivity(webIntent)
+        try {
+            val webGmaps = "https://www.google.com/maps/dir/?api=1&destination=$latitude,$longitude"
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(webGmaps))
+            context.startActivity(intent)
+        } catch (ex: Exception) {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(fallbackUrl))
+            context.startActivity(intent)
+        }
+    }
+}
+
+private fun launchMerchantUrl(context: Context, url: String) {
+    try {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+        context.startActivity(intent)
+    } catch (e: Exception) {
+        Toast.makeText(context, "Could not open map link.", Toast.LENGTH_SHORT).show()
     }
 }
 

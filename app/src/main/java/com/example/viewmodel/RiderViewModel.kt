@@ -30,36 +30,7 @@ class RiderViewModel : ViewModel() {
     private val _state = MutableStateFlow(RiderState())
     val state: StateFlow<RiderState> = _state.asStateFlow()
 
-    val machines = listOf(
-        CODMachine(
-            name = "KeyBS Merchant",
-            branch = "Bin Omran",
-            mapUrl = "https://maps.app.goo.gl/r7JNNza8Vt18HLtJ9",
-            latitude = 25.2854,
-            longitude = 51.5310
-        ),
-        CODMachine(
-            name = "Fresh Way Supermarket",
-            branch = "Al Rayyan",
-            mapUrl = "https://maps.app.goo.gl/kA3MRiBFLtp4pq3T6",
-            latitude = 25.2910,
-            longitude = 51.4244
-        ),
-        CODMachine(
-            name = "Madeena Hypermarket",
-            branch = "Wakra",
-            mapUrl = "https://goo.gl/maps/v5aaGiHGVVuCjuL38",
-            latitude = 25.1715,
-            longitude = 51.6034
-        ),
-        CODMachine(
-            name = "Bathool Supermarket",
-            branch = "Lusail",
-            mapUrl = "https://maps.app.goo.gl/PubPTcHtkb8EBeoN7",
-            latitude = 25.4245,
-            longitude = 51.5330
-        )
-    )
+    val machines = com.example.model.CODMachineRepository.getMachines()
 
     val locationPresets = listOf(
         LocationPreset("Doha Corniche (Center)", 25.2926, 51.5235, "Central Doha"),
