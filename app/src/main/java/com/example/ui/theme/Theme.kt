@@ -13,29 +13,30 @@ import androidx.compose.ui.platform.LocalContext
 
 private val DarkColorScheme =
   darkColorScheme(
-    primary = CrimsonRed,
-    secondary = CrimsonRedLight,
-    tertiary = AccentGold,
-    background = SlateBg,
-    surface = SlateCard,
+    primary = BrightCoral,
+    secondary = NeonTurquoise,
+    tertiary = AmberGold,
+    background = DarkMarineBg,
+    surface = DarkMarineCard,
     onPrimary = Color.White,
-    onSecondary = Color.White,
-    onTertiary = Color.White,
+    onSecondary = Color.Black,
+    onTertiary = Color.Black,
     onBackground = LightGrayText,
     onSurface = Color.White
   )
 
 private val LightColorScheme =
   lightColorScheme(
-    primary = CrimsonRed,
-    secondary = CrimsonRedLight,
-    tertiary = AccentGold,
-    background = Color(0xFFF8FAFC),
-    surface = Color.White,
+    primary = LightSkyPrimary,
+    secondary = LightSkySecondary,
+    tertiary = LightSkyTertiary,
+    background = LightSkyBg,
+    surface = LightSkyCard,
     onPrimary = Color.White,
     onSecondary = Color.White,
-    onBackground = Color(0xFF0F172A),
-    onSurface = Color(0xFF0F172A)
+    onTertiary = Color.White,
+    onBackground = Color(0xFF1E3A8A), // Deep Navy for light-mode text readability
+    onSurface = Color(0xFF1E3A8A)
   )
 
 @Composable
@@ -47,11 +48,7 @@ fun MyApplicationTheme(
 ) {
   val colorScheme =
     when {
-      dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-        val context = LocalContext.current
-        if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-      }
-
+      // Avoid dynamicColor setting to override our custom eye-catchy custom branding requested by the user
       darkTheme -> DarkColorScheme
       else -> LightColorScheme
     }

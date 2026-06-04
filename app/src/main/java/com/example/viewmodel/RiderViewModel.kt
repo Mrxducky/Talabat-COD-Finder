@@ -22,7 +22,13 @@ data class RiderState(
     val simulatedLongitude: Double = 51.5235,
     val isRealGpsActive: Boolean = false,
     val nearestMachine: Pair<CODMachine, Double>? = null,
-    val machinesWithDistance: List<Pair<CODMachine, Double>> = emptyList()
+    val machinesWithDistance: List<Pair<CODMachine, Double>> = emptyList(),
+    // Custom premium enhancements requested by the user
+    val isDarkMode: Boolean = true,
+    val isLoggedIn: Boolean = false,
+    val loggedInUser: String = "",
+    val loggedInPhone: String = "",
+    val activeOtpCode: String? = null
 )
 
 class RiderViewModel : ViewModel() {
@@ -43,6 +49,44 @@ class RiderViewModel : ViewModel() {
 
     init {
         recalculateDistances()
+    }
+
+    fun toggleTheme() {
+        _state.value = _state.value.copy(isDarkMode = !_state.value.isDarkMode)
+    }
+
+    fun startPhoneVerification(phone: String): String {
+        // Generate a random stable 4-digit simulation OTP e.g. "4826"
+        val seed = phone.filter { it.isDigit() }.takeLast(4)
+        val otp = if (seed.length == 4) seed.reversed() else "7492"
+        _state.value = _state.value.copy(activeOtpCode = otp)
+        return otp
+    }
+
+    fun completePhoneLogin(phone: String, userName: String) {
+        _state.value = _state.value.copy(
+            isLoggedIn = true,
+            loggedInPhone = phone,
+            loggedInUser = if (userName.isBlank()) "QAR Rider $phone" else userName,
+            activeOtpCode = null
+        )
+    }
+
+    fun completeGoogleLogin(email: String, name: String) {
+        _state.value = _state.value.copy(
+            isLoggedIn = true,
+            loggedInUser = name,
+            loggedInPhone = email // Google email placed in secondary descriptor
+        )
+    }
+
+    fun logout() {
+        _state.value = _state.value.copy(
+            isLoggedIn = false,
+            loggedInUser = "",
+            loggedInPhone = "",
+            activeOtpCode = null
+        )
     }
 
     fun updateRiderType(type: String) {
