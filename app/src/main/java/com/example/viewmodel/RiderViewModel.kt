@@ -28,7 +28,17 @@ data class RiderState(
     val isLoggedIn: Boolean = false,
     val loggedInUser: String = "",
     val loggedInPhone: String = "",
-    val activeOtpCode: String? = null
+    val activeOtpCode: String? = null,
+    
+    // Talabat Genuine Rider state items
+    val isOnline: Boolean = true,
+    val selectedMachine: CODMachine? = null,
+    val navigationType: String = "External", // "InApp" or "External"
+    val avoidHighways: Boolean = false,
+    val avoidTolls: Boolean = false,
+    val mapboxMetrics: Boolean = true,
+    val biometricSignIn: Boolean = true,
+    val chatLanguage: String = "English"
 )
 
 class RiderViewModel : ViewModel() {
@@ -114,6 +124,38 @@ class RiderViewModel : ViewModel() {
             isRealGpsActive = isRealGps
         )
         recalculateDistances()
+    }
+
+    fun toggleOnlineStatus() {
+        _state.value = _state.value.copy(isOnline = !_state.value.isOnline)
+    }
+
+    fun selectMachine(machine: CODMachine?) {
+        _state.value = _state.value.copy(selectedMachine = machine)
+    }
+
+    fun updateNavigationType(type: String) {
+        _state.value = _state.value.copy(navigationType = type)
+    }
+
+    fun toggleAvoidHighways() {
+        _state.value = _state.value.copy(avoidHighways = !_state.value.avoidHighways)
+    }
+
+    fun toggleAvoidTolls() {
+        _state.value = _state.value.copy(avoidTolls = !_state.value.avoidTolls)
+    }
+
+    fun toggleMapboxMetrics() {
+        _state.value = _state.value.copy(mapboxMetrics = !_state.value.mapboxMetrics)
+    }
+
+    fun toggleBiometricSignIn() {
+        _state.value = _state.value.copy(biometricSignIn = !_state.value.biometricSignIn)
+    }
+
+    fun updateChatLanguage(lang: String) {
+        _state.value = _state.value.copy(chatLanguage = lang)
     }
 
     private fun recalculateDistances() {
