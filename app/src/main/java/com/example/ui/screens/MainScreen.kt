@@ -673,7 +673,7 @@ fun RadarMapDashboard(
                 )
 
                 Text(
-                    text = String.format("%.4° N, %.4° E", state.simulatedLatitude, state.simulatedLongitude),
+                    text = String.format("%.4f° N, %.4f° E", state.simulatedLatitude, state.simulatedLongitude),
                     fontSize = 10.sp,
                     fontFamily = FontFamily.Monospace,
                     color = Color.Gray
