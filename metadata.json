@@ -1,0 +1,6 @@
+{
+  "name": "COD Rider Qatar",
+  "description": "A high-performance Cash-on-Delivery (COD) limit tracker and real-time safe drop machine locator for delivery riders in Qatar.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
