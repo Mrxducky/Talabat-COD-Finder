@@ -5,10 +5,13 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
-import android.location.LocationListener
 import android.location.LocationManager
 import android.net.Uri
 import android.os.Bundle
+import android.os.Looper
+import android.webkit.JavascriptInterface
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -20,7 +23,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.DirectionsBike
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -43,15 +45,20 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.example.model.CODMachine
 import com.example.model.LocationPreset
 import com.example.viewmodel.RiderState
 import com.example.viewmodel.RiderViewModel
-import com.example.viewmodel.WarningLevel
+import com.google.android.gms.location.*
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
-private var activeLocationListener: LocationListener? = null
+// Global tracking client variables to manage continuous Fused GPS lifecycle cleanly
+private var fusedLocationClient: FusedLocationProviderClient? = null
+private var locationCallback: LocationCallback? = null
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -59,31 +66,88 @@ fun MainScreen(viewModel: RiderViewModel) {
     val state by viewModel.state.collectAsState()
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
+    val scope = rememberCoroutineScope()
 
     var selectedMachineForNavigation by remember { mutableStateOf<CODMachine?>(null) }
+    var wasPermissionRequestedOnStart by remember { mutableStateOf(false) }
 
-    // Request permissions launcher
+    // Live state checks for permission & GPS system switches
+    var isGpsProviderEnabled by remember { mutableStateOf(true) }
+    var isLocationPermissionGranted by remember { mutableStateOf(true) }
+
+    // Fused Location Tracker callback
+    val startTrackingGps = {
+        if (fusedLocationClient == null) {
+            fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
+        }
+        
+        // Remove existing callback to prevent duplicate feeds
+        locationCallback?.let { fusedLocationClient?.removeLocationUpdates(it) }
+
+        // Core high-accuracy 5s GPS location request configuration
+        val locationRequest = LocationRequest.Builder(
+            Priority.PRIORITY_HIGH_ACCURACY,
+            5000L // 5 seconds
+        ).apply {
+            setMinUpdateIntervalMillis(5000L)
+            setMinUpdateDistanceMeters(0f)
+        }.build()
+
+        val callback = object : LocationCallback() {
+            override fun onLocationResult(locationResult: LocationResult) {
+                locationResult.lastLocation?.let { loc ->
+                    viewModel.updateLocation(loc.latitude, loc.longitude, true)
+                }
+            }
+        }
+        locationCallback = callback
+
+        try {
+            // First run check to pull the immediate last coordinates
+            fusedLocationClient?.lastLocation?.addOnSuccessListener { loc: Location? ->
+                if (loc != null) {
+                    viewModel.updateLocation(loc.latitude, loc.longitude, true)
+                }
+            }
+            
+            fusedLocationClient?.requestLocationUpdates(
+                locationRequest,
+                callback,
+                Looper.getMainLooper()
+            )
+        } catch (e: SecurityException) {
+            e.printStackTrace()
+        }
+    }
+
+    // Dynamic Permission requesting launcher
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         val fineGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] ?: false
         val coarseGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] ?: false
         if (fineGranted || coarseGranted) {
-            Toast.makeText(context, "Location permission granted. Syncing GPS...", Toast.LENGTH_SHORT).show()
-            setupContinuousGpsTracking(context, viewModel)
+            isLocationPermissionGranted = true
+            Toast.makeText(context, "GPS permission authorized. Real-time logging configured.", Toast.LENGTH_SHORT).show()
+            startTrackingGps()
         } else {
-            Toast.makeText(context, "Location access denied. Using precision simulator landmark controls.", Toast.LENGTH_LONG).show()
+            isLocationPermissionGranted = false
+            Toast.makeText(context, "Location permission rejected. Running manual navigation simulation mode.", Toast.LENGTH_LONG).show()
         }
     }
 
-    // AUTO SYNC LOCATION ON STARTUP FOR WAZE REAL TIME EXPECTATION
+    // Auto-sync locations and check system attributes cleanly
     LaunchedEffect(state.isLoggedIn) {
         if (state.isLoggedIn) {
             val fineLoc = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION)
             val coarseLoc = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION)
-            if (fineLoc == PackageManager.PERMISSION_GRANTED || coarseLoc == PackageManager.PERMISSION_GRANTED) {
-                setupContinuousGpsTracking(context, viewModel)
-            } else {
+            val isGranted = (fineLoc == PackageManager.PERMISSION_GRANTED || coarseLoc == PackageManager.PERMISSION_GRANTED)
+            isLocationPermissionGranted = isGranted
+
+            if (isGranted) {
+                startTrackingGps()
+            } else if (!wasPermissionRequestedOnStart) {
+                wasPermissionRequestedOnStart = true
                 locationPermissionLauncher.launch(
                     arrayOf(
                         Manifest.permission.ACCESS_FINE_LOCATION,
@@ -91,6 +155,23 @@ fun MainScreen(viewModel: RiderViewModel) {
                     )
                 )
             }
+        }
+    }
+
+    // Continuous 5-second validation loop of system components
+    LaunchedEffect(state.isLoggedIn) {
+        while (state.isLoggedIn) {
+            val fineLoc = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION)
+            val coarseLoc = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION)
+            isLocationPermissionGranted = (fineLoc == PackageManager.PERMISSION_GRANTED || coarseLoc == PackageManager.PERMISSION_GRANTED)
+
+            val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+            isGpsProviderEnabled = try {
+                locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
+            } catch (e: Exception) {
+                false
+            }
+            delay(5000L)
         }
     }
 
@@ -170,7 +251,7 @@ fun MainScreen(viewModel: RiderViewModel) {
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = "ONLINE",
+                                    text = "LIVE GPS",
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color(0xFF10B981)
@@ -190,7 +271,7 @@ fun MainScreen(viewModel: RiderViewModel) {
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp)
         ) {
-            // Greetings Header Card showing profile details
+            // Greetings Header Card with active indicators
             Card(
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = surfaceColor),
@@ -251,6 +332,8 @@ fun MainScreen(viewModel: RiderViewModel) {
                     IconButton(
                         onClick = {
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            // Stop GPS requests, shut listener to save battery
+                            locationCallback?.let { fusedLocationClient?.removeLocationUpdates(it) }
                             viewModel.logout()
                             Toast.makeText(context, "Logged out successfully.", Toast.LENGTH_SHORT).show()
                         }
@@ -265,22 +348,80 @@ fun MainScreen(viewModel: RiderViewModel) {
                 }
             }
 
-            // Header Info & Quick Status Summary
-            BalanceAlertCard(state, viewModel)
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            // Limit configuration & Inputs
-            RiderModeSelector(state, viewModel, haptic)
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            CODInputSection(state, viewModel, haptic)
-
-            Spacer(modifier = Modifier.height(20.dp))
+            // GRACEFUL SYSTEM STATES BANNER (Handle Permission Denied or GPS switch turned off)
+            AnimatedVisibility(visible = !isLocationPermissionGranted || !isGpsProviderEnabled) {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp),
+                    border = BorderStroke(1.2.dp, MaterialTheme.colorScheme.error)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Warning,
+                                contentDescription = "Alert",
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = "GPS System Discrepancy",
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                fontSize = 14.sp
+                            )
+                        }
+                        
+                        Spacer(modifier = Modifier.height(6.dp))
+                        
+                        val msg = when {
+                            !isLocationPermissionGranted && !isGpsProviderEnabled -> 
+                                "Location access permissions are revoked AND your physical GPS device sensor is disabled. Authorize permissions and toggle GPS to restore tracing."
+                            !isLocationPermissionGranted -> 
+                                "Location permission is required for accurate Talabat safe drops. Please tap below to authorize sensor access."
+                            else -> 
+                                "GPS Navigation satellite hardware is disabled. Slide down your notification tray and activate GPS/Location location parameters."
+                        }
+                        
+                        Text(
+                            text = msg,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.85f),
+                            lineHeight = 16.sp
+                        )
+                        
+                        if (!isLocationPermissionGranted) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Button(
+                                onClick = {
+                                    locationPermissionLauncher.launch(
+                                        arrayOf(
+                                            Manifest.permission.ACCESS_FINE_LOCATION,
+                                            Manifest.permission.ACCESS_COARSE_LOCATION
+                                        )
+                                    )
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.error
+                                ),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.align(Alignment.End)
+                            ) {
+                                Text("Grant Permission", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
 
             // High Tech Map Dashboard Card
-            RadarMapDashboard(state, viewModel, locationPermissionLauncher, haptic)
+            LiveMapDashboard(state, viewModel, locationPermissionLauncher, haptic) { clickedMachineId ->
+                val match = viewModel.machines.find { it.merchantId == clickedMachineId }
+                if (match != null) {
+                    selectedMachineForNavigation = match
+                }
+            }
 
             Spacer(modifier = Modifier.height(20.dp))
 
@@ -291,7 +432,7 @@ fun MainScreen(viewModel: RiderViewModel) {
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // All Machines Directory List
+            // All Machines Directory List sorted closest to farthest
             DropMachinesList(state) { machine ->
                 selectedMachineForNavigation = machine
             }
@@ -305,7 +446,7 @@ fun MainScreen(viewModel: RiderViewModel) {
             title = {
                 Column {
                     Text(
-                        text = "High-Precision Turn Navigation",
+                        text = "Safe Drop Navigation Setup",
                         fontWeight = FontWeight.Bold,
                         fontSize = 18.sp,
                         color = textColor
@@ -330,31 +471,7 @@ fun MainScreen(viewModel: RiderViewModel) {
                         modifier = Modifier.padding(bottom = 8.dp)
                     )
 
-                    // 1. Waze Button
-                    Button(
-                        onClick = {
-                            launchWaze(context, machine.latitude, machine.longitude, machine.mapUrl)
-                            selectedMachineForNavigation = null
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF33D1FF), // Waze blue
-                            contentColor = Color.Black
-                        ),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth().height(48.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.Navigation,
-                                contentDescription = "Waze",
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Navigate with Waze", fontWeight = FontWeight.Bold)
-                        }
-                    }
-
-                    // 2. Google Maps Button
+                    // 1. Google Maps Button (Primary Action)
                     Button(
                         onClick = {
                             launchGoogleMaps(context, machine.latitude, machine.longitude, machine.mapUrl)
@@ -365,7 +482,10 @@ fun MainScreen(viewModel: RiderViewModel) {
                             contentColor = Color.White
                         ),
                         shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth().height(48.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("dialog_google_maps_btn")
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
@@ -375,6 +495,32 @@ fun MainScreen(viewModel: RiderViewModel) {
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text("Navigate with Google Maps", fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    // 2. Waze Button
+                    Button(
+                        onClick = {
+                            launchWaze(context, machine.latitude, machine.longitude, machine.mapUrl)
+                            selectedMachineForNavigation = null
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF33D1FF), // Waze blue
+                            contentColor = Color.Black
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Navigation,
+                                contentDescription = "Waze",
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Navigate with Waze", fontWeight = FontWeight.Bold)
                         }
                     }
 
@@ -389,7 +535,9 @@ fun MainScreen(viewModel: RiderViewModel) {
                             contentColor = textMuted
                         ),
                         shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth().height(48.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
@@ -422,7 +570,6 @@ fun LoginScreen(viewModel: RiderViewModel, state: RiderState) {
     val haptic = LocalHapticFeedback.current
     val isDark = state.isDarkMode
 
-    // Local colors for LoginScreen
     val surfaceColor = if (isDark) Color(0xFF1C2541) else Color(0xFFFFFFFF)
     val bgColor = if (isDark) Color(0xFF0C132B) else Color(0xFFEFF5FF)
     val primaryColor = if (isDark) Color(0xFFFF5252) else Color(0xFF3B82F6)
@@ -477,12 +624,11 @@ fun LoginScreen(viewModel: RiderViewModel, state: RiderState) {
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Elegant Visual Radar Badge/Logo on login screen
+            // Radar branding visual logo
             Box(
                 modifier = Modifier
                     .size(120.dp)
                     .drawBehind {
-                        // Custom radar drawing inside login
                         drawCircle(
                             color = primaryColor.copy(alpha = 0.15f),
                             radius = size.minDimension / 2
@@ -512,7 +658,6 @@ fun LoginScreen(viewModel: RiderViewModel, state: RiderState) {
                     )
                 }
                 
-                // Pulsing dot simulation
                 Box(
                     modifier = Modifier
                         .size(10.dp)
@@ -540,7 +685,7 @@ fun LoginScreen(viewModel: RiderViewModel, state: RiderState) {
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Professional Tab Row switcher
+            // Tab switcher
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -587,9 +732,7 @@ fun LoginScreen(viewModel: RiderViewModel, state: RiderState) {
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // Display selected login content
             if (loginTab == 0) {
-                // Phone authentication card
                 if (!otpMode) {
                     Card(
                         shape = RoundedCornerShape(20.dp),
@@ -621,7 +764,9 @@ fun LoginScreen(viewModel: RiderViewModel, state: RiderState) {
                                     unfocusedContainerColor = bgColor
                                 ),
                                 placeholder = { Text("e.g. Abrehan Khan", color = textMuted.copy(alpha = 0.5f)) },
-                                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 12.dp)
                             )
 
                             Row(
@@ -629,12 +774,13 @@ fun LoginScreen(viewModel: RiderViewModel, state: RiderState) {
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                // Dynamic Country Code Selector
                                 Surface(
                                     shape = RoundedCornerShape(12.dp),
                                     border = BorderStroke(1.dp, borderColor),
                                     color = bgColor,
-                                    modifier = Modifier.height(56.dp).width(90.dp)
+                                    modifier = Modifier
+                                        .height(56.dp)
+                                        .width(90.dp)
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
                                         Text("🇶🇦 +974", fontWeight = FontWeight.Bold, color = textColor, fontSize = 14.sp)
@@ -675,19 +821,19 @@ fun LoginScreen(viewModel: RiderViewModel, state: RiderState) {
                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                         mockOtp = viewModel.startPhoneVerification(phoneNumber)
                                         otpMode = true
-                                        Toast.makeText(context, "Verification SMS Sent. Emulator OTP code is: $mockOtp", Toast.LENGTH_LONG).show()
                                     }
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = primaryColor, contentColor = Color.White),
                                 shape = RoundedCornerShape(14.dp),
-                                modifier = Modifier.fillMaxWidth().height(50.dp)
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(50.dp)
                             ) {
                                 Text("Send Verification SMS", fontWeight = FontWeight.Bold, fontSize = 15.sp)
                             }
                         }
                     }
                 } else {
-                    // OTP mode view
                     Card(
                         shape = RoundedCornerShape(20.dp),
                         colors = CardDefaults.cardColors(containerColor = surfaceColor),
@@ -709,10 +855,31 @@ fun LoginScreen(viewModel: RiderViewModel, state: RiderState) {
                                 color = textMuted,
                                 fontSize = 11.sp,
                                 textAlign = TextAlign.Center,
-                                modifier = Modifier.padding(top = 4.dp, bottom = 16.dp)
+                                modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
                             )
 
-                            // Clean OTP Code display
+                            // PROMINENT MOCK SMS BOX - MAKES SIMULATION EXTREMELY FOOLPROOF
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = primaryColor.copy(alpha = 0.12f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 16.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(1.dp, primaryColor.copy(alpha = 0.4f))
+                            ) {
+                                Text(
+                                    text = "TALABAT SMS SYSTEM:\nYour code is $mockOtp\n(or type master code: 1234)",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = primaryColor,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                                    textAlign = TextAlign.Center,
+                                    lineHeight = 16.sp
+                                )
+                            }
+
                             Row(
                                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                                 modifier = Modifier.padding(bottom = 20.dp)
@@ -740,7 +907,6 @@ fun LoginScreen(viewModel: RiderViewModel, state: RiderState) {
                                 }
                             }
 
-                            // Glove Friendly Numeric Keypad drawn directly on screen
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -774,12 +940,12 @@ fun LoginScreen(viewModel: RiderViewModel, state: RiderState) {
                                                         when (key) {
                                                             "Clear" -> if (otpInput.isNotEmpty()) otpInput = otpInput.dropLast(1)
                                                             "Submit" -> {
-                                                                if (otpInput == mockOtp) {
+                                                                if (otpInput == mockOtp || otpInput == "1234") {
                                                                     viewModel.completePhoneLogin(phoneNumber, userNameInput)
                                                                     Toast.makeText(context, "Access Granted! Welcome back.", Toast.LENGTH_SHORT).show()
                                                                 } else {
                                                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                                    Toast.makeText(context, "Invalid OTP code. Please check SMS or try code: $mockOtp", Toast.LENGTH_SHORT).show()
+                                                                    Toast.makeText(context, "Invalid OTP code. Please enter: $mockOtp", Toast.LENGTH_SHORT).show()
                                                                 }
                                                             }
                                                             else -> if (otpInput.length < 4) otpInput += key
@@ -788,7 +954,9 @@ fun LoginScreen(viewModel: RiderViewModel, state: RiderState) {
                                                     colors = ButtonDefaults.buttonColors(containerColor = btnColor, contentColor = contentColor),
                                                     shape = RoundedCornerShape(10.dp),
                                                     contentPadding = PaddingValues(0.dp),
-                                                    modifier = Modifier.weight(1f).height(44.dp)
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .height(44.dp)
                                                 ) {
                                                     Text(key, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                                 }
@@ -812,7 +980,6 @@ fun LoginScreen(viewModel: RiderViewModel, state: RiderState) {
                     }
                 }
             } else {
-                // Google Account Selector tab
                 Card(
                     shape = RoundedCornerShape(20.dp),
                     colors = CardDefaults.cardColors(containerColor = surfaceColor),
@@ -838,7 +1005,6 @@ fun LoginScreen(viewModel: RiderViewModel, state: RiderState) {
                             modifier = Modifier.padding(bottom = 20.dp)
                         )
 
-                        // Google Sign In Button
                         Button(
                             onClick = {
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -850,7 +1016,9 @@ fun LoginScreen(viewModel: RiderViewModel, state: RiderState) {
                             ),
                             shape = RoundedCornerShape(12.dp),
                             border = BorderStroke(1.dp, borderColor),
-                            modifier = Modifier.fillMaxWidth().height(50.dp)
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(50.dp)
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -872,7 +1040,6 @@ fun LoginScreen(viewModel: RiderViewModel, state: RiderState) {
 
             Spacer(modifier = Modifier.height(40.dp))
 
-            // Footer compliance text
             Text(
                 text = "TALABAT COURIER UTILITY v3.12 • COOPERATIVE PARTNER QATAR\nDEVELOPMENT INQUIRIES OR FEEDBACK DIRECT TO USER PROFILE PORTAL",
                 fontSize = 9.sp,
@@ -883,7 +1050,6 @@ fun LoginScreen(viewModel: RiderViewModel, state: RiderState) {
         }
     }
 
-    // Google Account Chooser simulation dialog
     if (showGoogleAccountChooser) {
         AlertDialog(
             onDismissRequest = { showGoogleAccountChooser = false },
@@ -899,17 +1065,18 @@ fun LoginScreen(viewModel: RiderViewModel, state: RiderState) {
                         modifier = Modifier.padding(bottom = 8.dp)
                     )
 
-                    // 1. User specified Email
                     Surface(
                         shape = RoundedCornerShape(12.dp),
                         color = bgColor,
                         border = BorderStroke(1.dp, borderColor),
-                        modifier = Modifier.fillMaxWidth().clickable {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            viewModel.completeGoogleLogin("abrehankhan@gmail.com", "Abrehan Khan")
-                            showGoogleAccountChooser = false
-                            Toast.makeText(context, "Signed in successfully as Abrehan Khan!", Toast.LENGTH_SHORT).show()
-                        }
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                viewModel.completeGoogleLogin("abrehankhan@gmail.com", "Abrehan Khan")
+                                showGoogleAccountChooser = false
+                                Toast.makeText(context, "Signed in successfully as Abrehan Khan!", Toast.LENGTH_SHORT).show()
+                            }
                     ) {
                         Row(
                             modifier = Modifier.padding(12.dp),
@@ -931,17 +1098,18 @@ fun LoginScreen(viewModel: RiderViewModel, state: RiderState) {
                         }
                     }
 
-                    // 2. Mock Guest Courier Account
                     Surface(
                         shape = RoundedCornerShape(12.dp),
                         color = bgColor,
                         border = BorderStroke(1.dp, borderColor),
-                        modifier = Modifier.fillMaxWidth().clickable {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            viewModel.completeGoogleLogin("talabat_rider_doha@gmail.com", "Talabat Rider")
-                            showGoogleAccountChooser = false
-                            Toast.makeText(context, "Signed in as Talabat Rider!", Toast.LENGTH_SHORT).show()
-                        }
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                viewModel.completeGoogleLogin("talabat_rider_doha@gmail.com", "Talabat Rider")
+                                showGoogleAccountChooser = false
+                                Toast.makeText(context, "Signed in as Talabat Rider!", Toast.LENGTH_SHORT).show()
+                            }
                     ) {
                         Row(
                             modifier = Modifier.padding(12.dp),
@@ -977,361 +1145,15 @@ fun LoginScreen(viewModel: RiderViewModel, state: RiderState) {
 }
 
 @Composable
-fun BalanceAlertCard(state: RiderState, viewModel: RiderViewModel) {
-    val limit = viewModel.getLimitForType(state.riderType)
-    val warning = viewModel.getWarningLevel(state.currentCOD, state.riderType)
-    val progress = (state.currentCOD / limit).coerceIn(0.0, 1.0).toFloat()
-
-    val isDark = state.isDarkMode
-    val surfaceColor = if (isDark) Color(0xFF1C2541) else Color(0xFFFFFFFF)
-    val textColor = if (isDark) Color.White else Color(0xFF0C132B)
-    val textMuted = if (isDark) Color.LightGray else Color(0xFF475569)
-
-    val progressColor = Color(warning.colorHex)
-
-    val cardColor by animateColorAsState(
-        targetValue = progressColor.copy(alpha = 0.15f),
-        animationSpec = twinPulseSpec()
-    )
-
-    Card(
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = surfaceColor),
-        border = BorderStroke(1.5.dp, progressColor.copy(alpha = 0.7f)),
-        modifier = Modifier
-            .fillMaxWidth()
-            .shadow(12.dp, RoundedCornerShape(24.dp))
-            .testTag("balance_alert_card")
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            surfaceColor,
-                            cardColor
-                        )
-                    )
-                )
-                .padding(24.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Current Cash-on-Hand",
-                    fontSize = 14.sp,
-                    color = textMuted,
-                    fontWeight = FontWeight.Medium
-                )
-                Icon(
-                    imageVector = when (warning) {
-                        WarningLevel.SAFE -> Icons.Default.CheckCircle
-                        WarningLevel.WARNING -> Icons.Default.Warning
-                        WarningLevel.CRITICAL -> Icons.Default.ReportProblem
-                    },
-                    contentDescription = null,
-                    tint = progressColor,
-                    modifier = Modifier.size(24.dp)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Row(
-                verticalAlignment = Alignment.Bottom
-            ) {
-                Text(
-                    text = "QAR ${state.currentCOD.roundToInt()}",
-                    fontSize = 38.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = textColor
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = "/ QAR ${limit.roundToInt()}",
-                    fontSize = 16.sp,
-                    color = textMuted.copy(alpha = 0.7f),
-                    modifier = Modifier.padding(bottom = 6.dp)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            LinearProgressIndicator(
-                progress = { progress },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(10.dp)
-                    .clip(RoundedCornerShape(5.dp)),
-                color = progressColor,
-                trackColor = if (isDark) Color(0xFF334155) else Color(0xFFE2E8F0)
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Surface(
-                color = progressColor.copy(alpha = 0.2f),
-                shape = RoundedCornerShape(12.dp),
-                border = BorderStroke(1.dp, progressColor.copy(alpha = 0.4f)),
-                modifier = Modifier.align(Alignment.Start)
-            ) {
-                Text(
-                    text = warning.message,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = progressColor,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun RiderModeSelector(state: RiderState, viewModel: RiderViewModel, haptic: androidx.compose.ui.hapticfeedback.HapticFeedback) {
-    val isDark = state.isDarkMode
-    val surfaceColor = if (isDark) Color(0xFF1C2541) else Color(0xFFFFFFFF)
-    val primaryColor = if (isDark) Color(0xFFFF5252) else Color(0xFF3B82F6)
-    val borderColor = if (isDark) Color(0xFF3A4E7A) else Color(0xFFD6E4FF)
-    val textColor = if (isDark) Color.White else Color(0xFF0C132B)
-
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        // Bike Rider Selector
-        val isBike = state.riderType == "Bike"
-        val bikeBg = if (isBike) primaryColor else surfaceColor
-        val bikeBorder = if (isBike) primaryColor.copy(alpha = 0.8f) else borderColor
-        val bikeContentColor = if (isBike) Color.White else textColor
-
-        Button(
-            onClick = {
-                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                viewModel.updateRiderType("Bike")
-            },
-            shape = RoundedCornerShape(16.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = bikeBg, contentColor = bikeContentColor),
-            border = BorderStroke(1.5.dp, bikeBorder),
-            contentPadding = PaddingValues(vertical = 12.dp),
-            modifier = Modifier
-                .weight(1f)
-                .height(56.dp)
-                .testTag("bike_rider_selector")
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.TwoWheeler,
-                    contentDescription = null,
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Column {
-                    Text(
-                        text = "Bike Rider",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
-                    )
-                    Text(
-                        text = "Limit: 900 QAR",
-                        fontSize = 10.sp,
-                        color = bikeContentColor.copy(alpha = 0.8f)
-                    )
-                }
-            }
-        }
-
-        // Car Rider Selector
-        val isCar = state.riderType == "Car"
-        val carBg = if (isCar) primaryColor else surfaceColor
-        val carBorder = if (isCar) primaryColor.copy(alpha = 0.8f) else borderColor
-        val carContentColor = if (isCar) Color.White else textColor
-
-        Button(
-            onClick = {
-                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                viewModel.updateRiderType("Car")
-            },
-            shape = RoundedCornerShape(16.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = carBg, contentColor = carContentColor),
-            border = BorderStroke(1.5.dp, carBorder),
-            contentPadding = PaddingValues(vertical = 12.dp),
-            modifier = Modifier
-                .weight(1f)
-                .height(56.dp)
-                .testTag("car_rider_selector")
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.DirectionsCar,
-                    contentDescription = null,
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Column {
-                    Text(
-                        text = "Car Rider",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
-                    )
-                    Text(
-                        text = "Limit: 2300 QAR",
-                        fontSize = 10.sp,
-                        color = carContentColor.copy(alpha = 0.8f)
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun CODInputSection(state: RiderState, viewModel: RiderViewModel, haptic: androidx.compose.ui.hapticfeedback.HapticFeedback) {
-    val isDark = state.isDarkMode
-    val surfaceColor = if (isDark) Color(0xFF1C2541) else Color(0xFFFFFFFF)
-    val bgColor = if (isDark) Color(0xFF0C132B) else Color(0xFFEFF5FF)
-    val primaryColor = if (isDark) Color(0xFFFF5252) else Color(0xFF3B82F6)
-    val borderColor = if (isDark) Color(0xFF3A4E7A) else Color(0xFFD6E4FF)
-    val textColor = if (isDark) Color.White else Color(0xFF0C132B)
-    val textMuted = if (isDark) Color.LightGray else Color(0xFF475569)
-
-    var textValue by remember(state.currentCOD) {
-        mutableStateOf(if (state.currentCOD == 0.0) "" else state.currentCOD.roundToInt().toString())
-    }
-
-    Card(
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = surfaceColor),
-        border = BorderStroke(1.dp, borderColor),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
-        ) {
-            Text(
-                text = "Update Cash Status",
-                color = textColor,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            OutlinedTextField(
-                value = textValue,
-                onValueChange = { newValue ->
-                    val filtered = newValue.filter { it.isDigit() }
-                    textValue = filtered
-                    val doubleVal = filtered.toDoubleOrNull() ?: 0.0
-                    viewModel.updateCOD(doubleVal)
-                },
-                placeholder = {
-                    Text("Enter total balance amount in QAR", color = textMuted, fontSize = 14.sp)
-                },
-                trailingIcon = {
-                    if (textValue.isNotEmpty()) {
-                        IconButton(onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            viewModel.clearCOD()
-                            textValue = ""
-                        }) {
-                            Icon(imageVector = Icons.Default.Clear, contentDescription = "Clear", tint = textMuted)
-                        }
-                    }
-                },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                singleLine = true,
-                maxLines = 1,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = textColor,
-                    unfocusedTextColor = textColor,
-                    focusedContainerColor = bgColor,
-                    unfocusedContainerColor = bgColor,
-                    focusedBorderColor = primaryColor,
-                    unfocusedBorderColor = borderColor
-                ),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("cod_input_field")
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                listOf(50, 100, 500).forEach { increment ->
-                    Button(
-                        onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            viewModel.incrementCOD(increment.toDouble())
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (isDark) Color(0xFF334155) else Color(0xFFD6E4FF),
-                            contentColor = if (isDark) Color.White else Color(0xFF1E3A8A)
-                        ),
-                        shape = RoundedCornerShape(10.dp),
-                        contentPadding = PaddingValues(horizontal = 0.dp),
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("add_${increment}_btn")
-                    ) {
-                        Text(
-                            text = "+$increment QAR",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
-
-                Button(
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        viewModel.clearCOD()
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = primaryColor.copy(alpha = 0.15f),
-                        contentColor = primaryColor
-                    ),
-                    shape = RoundedCornerShape(10.dp),
-                    border = BorderStroke(1.dp, primaryColor.copy(alpha = 0.5f)),
-                    contentPadding = PaddingValues(horizontal = 0.dp),
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("clear_cod_btn")
-                ) {
-                    Text(
-                        text = "Reset",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun RadarMapDashboard(
+fun LiveMapDashboard(
     state: RiderState,
     viewModel: RiderViewModel,
     permissionLauncher: androidx.activity.result.ActivityResultLauncher<Array<String>>,
-    haptic: androidx.compose.ui.hapticfeedback.HapticFeedback
+    haptic: androidx.compose.ui.hapticfeedback.HapticFeedback,
+    onMachineClicked: (String) -> Unit
 ) {
     val context = LocalContext.current
-    var isExpanded by remember { mutableStateOf(false) }
+    var isExpandedPresets by remember { mutableStateOf(false) }
 
     val isDark = state.isDarkMode
     val surfaceColor = if (isDark) Color(0xFF1C2541) else Color(0xFFFFFFFF)
@@ -1358,27 +1180,42 @@ fun RadarMapDashboard(
             ) {
                 Column {
                     Text(
-                        text = "Rider Locator Map",
+                        text = "Rider Live Tracker",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         color = textColor
                     )
                     Text(
-                        text = "High-precision regional tactical radar",
+                        text = "Live geographic roadmap display",
                         fontSize = 11.sp,
                         color = textMuted
                     )
                 }
 
                 Row {
-                    // Actual GPS request button
+                    // Actual high accuracy GPS trigger
                     IconButton(
                         onClick = {
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             val fineLoc = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION)
                             val coarseLoc = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION)
                             if (fineLoc == PackageManager.PERMISSION_GRANTED || coarseLoc == PackageManager.PERMISSION_GRANTED) {
-                                setupContinuousGpsTracking(context, viewModel)
+                                if (fusedLocationClient == null) {
+                                    fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
+                                }
+                                val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5000L).build()
+                                val call = object : LocationCallback() {
+                                    override fun onLocationResult(locationResult: LocationResult) {
+                                        locationResult.lastLocation?.let { loc ->
+                                            viewModel.updateLocation(loc.latitude, loc.longitude, true)
+                                        }
+                                    }
+                                }
+                                locationCallback = call
+                                try {
+                                    fusedLocationClient?.requestLocationUpdates(req, call, Looper.getMainLooper())
+                                    Toast.makeText(context, "High accuracy GPS tracking synced! (Every 5s)", Toast.LENGTH_SHORT).show()
+                                } catch (e: SecurityException) {}
                             } else {
                                 permissionLauncher.launch(
                                     arrayOf(
@@ -1408,14 +1245,14 @@ fun RadarMapDashboard(
                     IconButton(
                         onClick = {
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            isExpanded = !isExpanded
+                            isExpandedPresets = !isExpandedPresets
                         },
                         modifier = Modifier
                             .background(borderColor, CircleShape)
                             .size(36.dp)
                     ) {
                         Icon(
-                            imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.Map,
+                            imageVector = if (isExpandedPresets) Icons.Default.ExpandLess else Icons.Default.Map,
                             contentDescription = "Toggle Presets",
                             tint = textColor,
                             modifier = Modifier.size(18.dp)
@@ -1426,22 +1263,26 @@ fun RadarMapDashboard(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Main Map Frame
+            // LIVE GOOGLE MAP FRAME (Renders actual street layouts and user/machine icons)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(260.dp)
+                    .height(290.dp)
                     .clip(RoundedCornerShape(20.dp))
                     .border(2.dp, borderColor, RoundedCornerShape(20.dp))
                     .testTag("radar_map_canvas")
             ) {
-                InteractiveQatarRadarCanvas(state, viewModel)
+                GoogleMapWebView(
+                    state = state,
+                    machines = viewModel.machines,
+                    onMachineClicked = onMachineClicked
+                )
             }
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Preset locations
-            AnimatedVisibility(visible = isExpanded) {
+            // Landmark presets for manual placement testing
+            AnimatedVisibility(visible = isExpandedPresets) {
                 Column {
                     Text(
                         text = "Simulate Rider Landmark Coordinates",
@@ -1478,7 +1319,7 @@ fun RadarMapDashboard(
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = primaryColor,
                                     selectedLabelColor = Color.White,
-                                    containerColor = if (isDark) Color(0xFF0F172A) else Color(0xFFEDF2FE),
+                                    containerColor = if (isDark) Color(0xFF0F172E) else Color(0xFFEDF2FE),
                                     labelColor = textColor
                                 ),
                                 modifier = Modifier.testTag("preset_chip_${preset.label.take(5)}")
@@ -1490,14 +1331,13 @@ fun RadarMapDashboard(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Coordinates Display Meter
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = if (state.isRealGpsActive) "🟢 ACTIVE SATELLITE LOCK" else "📊 GPS COMPASS SIMULATION",
+                    text = if (state.isRealGpsActive) "🟢 ACTIVE SATELLITE FEED" else "📊 COMPASS DEMO GRID",
                     fontSize = 10.sp,
                     color = if (state.isRealGpsActive) Color(0xFF10B981) else Color(0xFFFFB300)
                 )
@@ -1514,205 +1354,145 @@ fun RadarMapDashboard(
 }
 
 @Composable
-fun InteractiveQatarRadarCanvas(state: RiderState, viewModel: RiderViewModel) {
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-
-    val pulseRadius by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2200, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "pulseRadius"
-    )
-
-    val pulseAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.7f,
-        targetValue = 0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2200, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "pulseAlpha"
-    )
-
-    val scanAngle by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(7000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "scanAngle"
-    )
-
-    val isDark = state.isDarkMode
-    val canvasBgColor = if (isDark) Color(0xFF070B19) else Color(0xFFE2ECFE)
-    val gridColor = if (isDark) Color(0xFF1D294E).copy(alpha = 0.4f) else Color(0xFFBACCE6).copy(alpha = 0.5f)
-    val primaryColor = if (isDark) Color(0xFFFF5252) else Color(0xFF3B82F6)
-    val secondaryColor = if (isDark) Color(0xFF00F2FE) else Color(0xFF06B6D4)
-    val userCursorColor = if (isDark) Color(0xFFFFB300) else Color(0xFF1E3A8A)
-
-    Canvas(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(canvasBgColor)
-    ) {
-        val minLat = 25.10
-        val maxLat = 25.48
-        val minLng = 51.35
-        val maxLng = 51.68
-
-        val mapWidth = size.width
-        val mapHeight = size.height
-
-        fun getOffset(latitude: Double, longitude: Double): Offset {
-            val yRatio = (maxLat - latitude) / (maxLat - minLat).toFloat()
-            val xRatio = (longitude - minLng) / (maxLng - minLng).toFloat()
-            return Offset(
-                x = (xRatio * mapWidth).toFloat(),
-                y = (yRatio * mapHeight).toFloat()
-            )
-        }
-
-        // concentric radar ranges around Central Doha
-        val centerDoha = getOffset(25.2854, 51.5310)
-
-        for (dist in listOf(20f, 60f, 110f, 170f, 240f)) {
-            drawCircle(
-                color = gridColor,
-                radius = dist * 2f,
-                center = centerDoha,
-                style = Stroke(width = 1f)
-            )
-        }
-
-        // coordinate grid lines
-        for (x_line in (0..4)) {
-            val x_pos = (x_line / 4f) * mapWidth
-            drawLine(
-                color = gridColor.copy(alpha = 0.2f),
-                start = Offset(x_pos, 0f),
-                end = Offset(x_pos, mapHeight),
-                strokeWidth = 1f
-            )
-        }
-        for (y_line in (0..4)) {
-            val y_pos = (y_line / 4f) * mapHeight
-            drawLine(
-                color = gridColor.copy(alpha = 0.2f),
-                start = Offset(0f, y_pos),
-                end = Offset(mapWidth, y_pos),
-                strokeWidth = 1f
-            )
-        }
-
-        // Coastal outline of Qatar
-        val coastPoints = listOf(
-            25.10 to 51.64,
-            25.15 to 51.62,
-            25.17 to 51.61,
-            25.19 to 51.61,
-            25.23 to 51.57,
-            25.26 to 51.54,
-            25.29 to 51.53,
-            25.33 to 51.51,
-            25.36 to 51.54,
-            25.38 to 51.56,
-            25.40 to 51.54,
-            25.43 to 51.53,
-            25.46 to 51.51,
-            25.48 to 51.49
-        )
-
-        val coastPath = Path()
-        coastPoints.forEachIndexed { index, pair ->
-            val offset = getOffset(pair.first, pair.second)
-            if (index == 0) {
-                coastPath.moveTo(offset.x, offset.y)
-            } else {
-                coastPath.lineTo(offset.x, offset.y)
+fun GoogleMapWebView(
+    state: RiderState,
+    machines: List<CODMachine>,
+    onMachineClicked: (String) -> Unit
+) {
+    val context = LocalContext.current
+    val webView = remember {
+        WebView(context).apply {
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            webViewClient = object : WebViewClient() {
+                override fun onPageFinished(view: WebView?, url: String?) {
+                    super.onPageFinished(view, url)
+                    // Trigger initial placement
+                    evaluateJavascript("updateUserLocation(${state.simulatedLatitude}, ${state.simulatedLongitude})", null)
+                }
             }
+            addJavascriptInterface(object {
+                @JavascriptInterface
+                fun onMachineClicked(merchantId: String) {
+                    onMachineClicked(merchantId)
+                }
+            }, "AndroidApp")
         }
-
-        drawPath(
-            path = coastPath,
-            color = gridColor.copy(alpha = 0.3f),
-            style = Stroke(width = 10f, join = StrokeJoin.Round, cap = StrokeCap.Round)
-        )
-
-        // Radar Sweep beam
-        val beamRad = maxOf(mapWidth, mapHeight)
-        val endSweepX = (centerDoha.x + beamRad * kotlin.math.cos(Math.toRadians(scanAngle.toDouble()))).toFloat()
-        val endSweepY = (centerDoha.y + beamRad * kotlin.math.sin(Math.toRadians(scanAngle.toDouble()))).toFloat()
-
-        drawLine(
-            color = primaryColor.copy(alpha = 0.08f),
-            start = centerDoha,
-            end = Offset(endSweepX, endSweepY),
-            strokeWidth = 6.dp.toPx(),
-            cap = StrokeCap.Round
-        )
-
-        // Link User to the nearest safe drop machine
-        val userOffset = getOffset(state.simulatedLatitude, state.simulatedLongitude)
-
-        state.nearestMachine?.let { (nearest, _) ->
-            val nearestOffset = getOffset(nearest.latitude, nearest.longitude)
-            drawLine(
-                color = primaryColor.copy(alpha = 0.5f),
-                start = userOffset,
-                end = nearestOffset,
-                strokeWidth = 2.dp.toPx(),
-                pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 12f), 0f)
-            )
-        }
-
-        // Draw all deposit machines on canvas
-        viewModel.machines.forEach { machine ->
-            val machineOffset = getOffset(machine.latitude, machine.longitude)
-            val isNearest = state.nearestMachine?.first?.name == machine.name
-
-            val pinColor = if (isNearest) primaryColor else secondaryColor
-
-            if (isNearest) {
-                drawCircle(
-                    color = pinColor.copy(alpha = pulseAlpha * 0.4f),
-                    radius = (10f + pulseRadius * 25f) * 1.5f,
-                    center = machineOffset
-                )
-            }
-
-            drawCircle(
-                color = pinColor,
-                radius = 7.dp.toPx(),
-                center = machineOffset
-            )
-            drawCircle(
-                color = canvasBgColor,
-                radius = 3.dp.toPx(),
-                center = machineOffset
-            )
-        }
-
-        // Draw self rider indicator
-        drawCircle(
-            color = userCursorColor.copy(alpha = pulseAlpha * 0.5f),
-            radius = (12f + pulseRadius * 30f) * 1.5f,
-            center = userOffset
-        )
-        drawCircle(
-            color = userCursorColor,
-            radius = 6.dp.toPx(),
-            center = userOffset
-        )
-        drawCircle(
-            color = Color.White,
-            radius = 3.dp.toPx(),
-            center = userOffset
-        )
     }
+
+    // Trigger update on lat/lng shifts
+    LaunchedEffect(state.simulatedLatitude, state.simulatedLongitude) {
+        webView.evaluateJavascript("updateUserLocation(${state.simulatedLatitude}, ${state.simulatedLongitude})", null)
+    }
+
+    // Dynamic initial page loading setup
+    LaunchedEffect(Unit) {
+        val markersJson = machines.map { m ->
+            """
+            {
+                name: "${m.name.replace("\"", "\\\"")}",
+                branch: "${m.branch.replace("\"", "\\\"")}",
+                merchantId: "${m.merchantId}",
+                lat: ${m.latitude},
+                lng: ${m.longitude},
+                isNearest: ${state.nearestMachine?.first?.merchantId == m.merchantId}
+            }
+            """.trimIndent()
+        }.joinToString(",")
+
+        val html = """
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+                <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+                <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+                <style>
+                    body { margin: 0; padding: 0; background-color: #070B19; }
+                    #map { width: 100vw; height: 100vh; }
+                    .pulsing-blue-marker {
+                        width: 14px;
+                        height: 14px;
+                        border-radius: 50%;
+                        background: #3B82F6;
+                        border: 2px solid white;
+                        box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.4);
+                        animation: pulse 1.5s infinite;
+                    }
+                    @keyframes pulse {
+                        0% { box-shadow: 0 0 0 0px rgba(59, 130, 246, 0.6); }
+                        100% { box-shadow: 0 0 0 10px rgba(59, 130, 246, 0); }
+                    }
+                    .leaflet-popup-content-wrapper {
+                        background: #1C2541;
+                        color: white;
+                        border-radius: 12px;
+                        font-family: system-ui, -apple-system, sans-serif;
+                    }
+                    .leaflet-popup-tip {
+                        background: #1C2541;
+                    }
+                </style>
+            </head>
+            <body>
+                <div id="map"></div>
+                <script>
+                    var map = L.map('map', { zoomControl: false }).setView([25.2926, 51.5235], 13);
+                    
+                    // Voyager Style Tile layer - gives an awesome, modern Google Maps aesthetic
+                    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+                        maxZoom: 19,
+                        attribution: '&copy; OpenStreetMap'
+                    }).addTo(map);
+
+                    var userMarker = null;
+                    var machineMarkers = {};
+                    var machinesData = [$markersJson];
+
+                    machinesData.forEach(function(m) {
+                        var color = m.isNearest ? '#FF5252' : '#06B6D4';
+                        var markerHtml = '<div style="background: ' + color + '; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 1px 3px rgba(0,0,0,0.4);"></div>';
+                        var customIcon = L.divIcon({
+                            html: markerHtml,
+                            className: 'custom-machine-marker',
+                            iconSize: [16, 16],
+                            iconAnchor: [8, 8]
+                        });
+
+                        var marker = L.marker([m.lat, m.lng], { icon: customIcon }).addTo(map);
+                        marker.bindPopup("<b style='font-size:13px; color: #fff;'>" + m.name + "</b><br><span style='font-size:11px;color:#aaa;'>" + m.branch + "</span><br><span style='font-size:10px;color:#888;'>ID: " + m.merchantId + "</span>");
+                        
+                        marker.on('click', function() {
+                            if (window.AndroidApp) {
+                                window.AndroidApp.onMachineClicked(m.merchantId);
+                            }
+                        });
+
+                        machineMarkers[m.merchantId] = marker;
+                    });
+
+                    function updateUserLocation(lat, lng) {
+                        var latLng = [lat, lng];
+                        if (!userMarker) {
+                            var blueIcon = L.divIcon({
+                                className: 'pulsing-blue-marker',
+                                iconSize: [14, 14],
+                                iconAnchor: [7, 7]
+                            });
+                            userMarker = L.marker(latLng, { icon: blueIcon }).addTo(map);
+                        } else {
+                            userMarker.setLatLng(latLng);
+                        }
+                        map.panTo(latLng);
+                    }
+                </script>
+            </body>
+            </html>
+        """.trimIndent()
+        webView.loadDataWithBaseURL("https://localhost", html, "text/html", "UTF-8", null)
+    }
+
+    AndroidView(factory = { webView }, modifier = Modifier.fillMaxSize())
 }
 
 @Composable
@@ -1806,6 +1586,7 @@ fun NearestMachineCard(state: RiderState, onNavigate: (CODMachine) -> Unit) {
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // DISPLAY IN BOTH METERS AND KILOMETERS AS REQUESTED
                     Column {
                         Text(
                             text = "ESTIMATED DISTANCE",
@@ -1813,9 +1594,17 @@ fun NearestMachineCard(state: RiderState, onNavigate: (CODMachine) -> Unit) {
                             color = textMuted,
                             fontWeight = FontWeight.Bold
                         )
+                        
+                        val distanceInMeters = (distanceKm * 1000).roundToInt()
+                        val text = if (distanceKm < 1.0) {
+                            "$distanceInMeters meters"
+                        } else {
+                            String.format("%.2f km (%d meters)", distanceKm, distanceInMeters)
+                        }
+
                         Text(
-                            text = String.format("%.2f km", distanceKm),
-                            fontSize = 24.sp,
+                            text = text,
+                            fontSize = 20.sp,
                             fontWeight = FontWeight.ExtraBold,
                             color = primaryColor
                         )
@@ -1868,8 +1657,8 @@ fun DropMachinesList(state: RiderState, onNavigate: (CODMachine) -> Unit) {
             modifier = Modifier.padding(20.dp)
         ) {
             Text(
-                text = "Safe Drop Machines Qatar",
-                fontSize = 16.sp,
+                text = "Safe Drop Machines Qatar (Sorted nearest to farthest)",
+                fontSize = 15.sp,
                 fontWeight = FontWeight.Bold,
                 color = textColor,
                 modifier = Modifier.padding(bottom = 16.dp)
@@ -1951,8 +1740,16 @@ fun DropMachinesList(state: RiderState, onNavigate: (CODMachine) -> Unit) {
                         Column(
                             horizontalAlignment = Alignment.End
                         ) {
+                            // SHOW SENSORY FEEDS OF METERS AND KILOMETERS
+                            val distMeters = (dist * 1000).roundToInt()
+                            val distLabel = if (dist < 1.0) {
+                                "$distMeters m"
+                            } else {
+                                String.format("%.2f km", dist)
+                            }
+
                             Text(
-                                text = String.format("%.1f km", dist),
+                                text = distLabel,
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = if (isNearest) primaryColor else textColor
@@ -2021,60 +1818,4 @@ private fun launchMerchantUrl(context: Context, url: String) {
     } catch (e: Exception) {
         Toast.makeText(context, "Could not open map link.", Toast.LENGTH_SHORT).show()
     }
-}
-
-private fun setupContinuousGpsTracking(context: Context, viewModel: RiderViewModel) {
-    val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-    try {
-        val hasGps = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
-        val hasNetwork = locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
-
-        val listener = object : LocationListener {
-            override fun onLocationChanged(loc: Location) {
-                viewModel.updateLocation(loc.latitude, loc.longitude, true)
-            }
-            override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
-            override fun onProviderEnabled(provider: String) {}
-            override fun onProviderDisabled(provider: String) {}
-        }
-
-        activeLocationListener?.let { locationManager.removeUpdates(it) }
-        activeLocationListener = listener
-
-        if (hasGps) {
-            locationManager.requestLocationUpdates(
-                LocationManager.GPS_PROVIDER,
-                2000L,
-                1f,
-                listener
-            )
-            val lastLoc = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-            if (lastLoc != null) {
-                viewModel.updateLocation(lastLoc.latitude, lastLoc.longitude, true)
-            }
-        } else if (hasNetwork) {
-            locationManager.requestLocationUpdates(
-                LocationManager.NETWORK_PROVIDER,
-                2000L,
-                1f,
-                listener
-            )
-            val lastLoc = locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
-            if (lastLoc != null) {
-                viewModel.updateLocation(lastLoc.latitude, lastLoc.longitude, true)
-            }
-        }
-    } catch (e: SecurityException) {
-        Toast.makeText(context, "Location authorization bypassed with local telemetry simulator.", Toast.LENGTH_SHORT).show()
-    } catch (e: Exception) {
-         // Silently ignore or fallback
-    }
-}
-
-@Composable
-fun twinPulseSpec(): InfiniteRepeatableSpec<Color> {
-    return infiniteRepeatable(
-        animation = tween(1200, easing = LinearEasing),
-        repeatMode = RepeatMode.Reverse
-    )
 }
