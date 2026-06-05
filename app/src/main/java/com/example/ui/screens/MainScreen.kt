@@ -404,15 +404,7 @@ fun MainScreen(viewModel: RiderViewModel) {
                                     }
                                 }
 
-                                Box {
-                                    IconButton(
-                                        onClick = { Toast.makeText(context, "Courier emergency line is Active", Toast.LENGTH_SHORT).show() },
-                                        modifier = Modifier.shadow(4.dp, CircleShape).background(surfaceColor, CircleShape).size(44.dp)
-                                    ) {
-                                        Icon(Icons.Default.Headset, contentDescription = "Help hotline", tint = textColor)
-                                    }
-                                    Box(modifier = Modifier.padding(3.dp).align(Alignment.TopEnd).size(10.dp).background(Color.Red, CircleShape))
-                                }
+                                Spacer(modifier = Modifier.size(44.dp))
                             }
                         }
 
@@ -527,6 +519,7 @@ fun MainScreen(viewModel: RiderViewModel) {
                         if (activeMachine != null && !isSimulatingNavigation) {
                             val distanceKm = state.nearestMachine?.second ?: 1.1
                             val distLabel = if (distanceKm < 1.0) "${(distanceKm * 1000).roundToInt()} meters" else String.format("%.2f km", distanceKm)
+                            val isSelectedMachine = state.selectedMachine != null
 
                             Card(
                                 shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
@@ -537,15 +530,33 @@ fun MainScreen(viewModel: RiderViewModel) {
                                     Box(modifier = Modifier.width(36.dp).height(4.dp).background(borderColor, RoundedCornerShape(2.dp)).align(Alignment.CenterHorizontally))
                                     Spacer(modifier = Modifier.height(14.dp))
 
+                                    // Professional card header
+                                    Text(
+                                        text = if (isSelectedMachine) "SELECTED DEPOSIT MACHINE" else "NEAREST SAFE DROP DEPOSIT MACHINE",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = primaryColor,
+                                        letterSpacing = 1.sp
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+
                                     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                         Column(modifier = Modifier.weight(1f)) {
-                                            Text(activeMachine.name, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = textColor)
-                                            Text("Arrive soon • $distLabel • ID: ${activeMachine.merchantId}", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = primaryColor)
-                                            Spacer(modifier = Modifier.height(2.dp))
+                                            Text(activeMachine.name, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = textColor)
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Icon(Icons.Default.LocationOn, contentDescription = null, tint = primaryColor, modifier = Modifier.size(14.dp))
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text("Distance: $distLabel", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = primaryColor)
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Box(modifier = Modifier.background(primaryColor.copy(alpha = 0.12f), RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp)) {
+                                                    Text("INSTANT CREDITING", color = primaryColor, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                                }
+                                            }
+                                            Spacer(modifier = Modifier.height(4.dp))
                                             Text("Zone 56, Street 964, Qatar Grand Mall, Doha", fontSize = 12.sp, color = textMuted)
                                         }
                                         IconButton(
-                                            onClick = { Toast.makeText(context, "Secure chat opened", Toast.LENGTH_SHORT).show() },
+                                            onClick = { Toast.makeText(context, "Secure WhatsApp chat line opened", Toast.LENGTH_SHORT).show() },
                                             modifier = Modifier.background(primaryColor.copy(alpha = 0.15f), CircleShape).size(42.dp)
                                         ) {
                                             Icon(Icons.Default.Chat, contentDescription = null, tint = primaryColor, modifier = Modifier.size(18.dp))
@@ -554,49 +565,24 @@ fun MainScreen(viewModel: RiderViewModel) {
 
                                     Spacer(modifier = Modifier.height(16.dp))
 
-                                    // Tab selectors
-                                    Row(modifier = Modifier.fillMaxWidth().border(1.dp, borderColor, RoundedCornerShape(8.dp)).padding(3.dp)) {
-                                        Button(
-                                            onClick = {
-                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                if (state.navigationType == "InApp") {
-                                                    isSimulatingNavigation = true
-                                                } else {
-                                                    selectedMachineForNavigation = activeMachine
-                                                }
-                                            },
-                                            shape = RoundedCornerShape(6.dp),
-                                            colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent, contentColor = textColor),
-                                            modifier = Modifier.weight(1f).height(40.dp)
-                                        ) {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Icon(Icons.Default.Bolt, contentDescription = null, tint = primaryColor, modifier = Modifier.size(16.dp))
-                                                Spacer(modifier = Modifier.width(6.dp))
-                                                Text("Start now", fontWeight = FontWeight.Bold)
-                                            }
-                                        }
-                                        Button(
-                                            onClick = { Toast.makeText(context, "No scheduled booking slots", Toast.LENGTH_SHORT).show() },
-                                            shape = RoundedCornerShape(6.dp),
-                                            colors = ButtonDefaults.buttonColors(containerColor = primaryColor.copy(alpha = 0.1f), contentColor = primaryColor),
-                                            modifier = Modifier.weight(1f).height(40.dp)
-                                        ) {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Icon(Icons.Default.DateRange, contentDescription = null, tint = primaryColor, modifier = Modifier.size(16.dp))
-                                                Spacer(modifier = Modifier.width(6.dp))
-                                                Text("Sessions", fontWeight = FontWeight.Bold)
-                                            }
-                                        }
-                                    }
-
-                                    Spacer(modifier = Modifier.height(10.dp))
                                     Button(
-                                        onClick = { Toast.makeText(context, "Scanning current active promotions...", Toast.LENGTH_SHORT).show() },
-                                        colors = ButtonDefaults.buttonColors(containerColor = if (isDark) Color(0xFF374151) else Color(0xFFF3F4F6)),
-                                        modifier = Modifier.fillMaxWidth(),
-                                        shape = RoundedCornerShape(10.dp)
+                                        onClick = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            if (state.navigationType == "InApp") {
+                                                isSimulatingNavigation = true
+                                            } else {
+                                                launchGoogleMaps(context, activeMachine.latitude, activeMachine.longitude, activeMachine.mapUrl)
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier.fillMaxWidth().height(52.dp)
                                     ) {
-                                        Text("See sessions or tap pins to explore opportunities", color = textColor, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+                                            Icon(Icons.Default.Navigation, contentDescription = null, tint = Color.White)
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text("START TRAVEL GUIDANCE", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.White)
+                                        }
                                     }
                                 }
                             }
@@ -752,63 +738,7 @@ fun MainScreen(viewModel: RiderViewModel) {
         }
     }
 
-    // Routing Popup launcher Dialog
-    if (selectedMachineForNavigation != null) {
-        val machine = selectedMachineForNavigation!!
-        AlertDialog(
-            onDismissRequest = { selectedMachineForNavigation = null },
-            title = {
-                Column {
-                    Text("Safe Drop Navigation Setup", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = textColor)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text("${machine.name} (${machine.branch})", fontSize = 12.sp, color = textMuted)
-                }
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Choose your preferred routing application below to begin step-by-step turn guidance.", fontSize = 13.sp, color = textMuted)
-                    Button(
-                        onClick = {
-                            launchGoogleMaps(context, machine.latitude, machine.longitude, machine.mapUrl)
-                            selectedMachineForNavigation = null
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = primaryColor, contentColor = Color.White),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.fillMaxWidth().height(44.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Map, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Navigate with Google Maps", fontWeight = FontWeight.Bold)
-                        }
-                    }
-                    Button(
-                        onClick = {
-                            launchWaze(context, machine.latitude, machine.longitude, machine.mapUrl)
-                            selectedMachineForNavigation = null
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF33D1FF), contentColor = Color.Black),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.fillMaxWidth().height(44.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Navigation, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Navigate with Waze", fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-            },
-            confirmButton = {},
-            dismissButton = {
-                TextButton(onClick = { selectedMachineForNavigation = null }) {
-                    Text("Cancel", color = primaryColor)
-                }
-            },
-            containerColor = surfaceColor,
-            shape = RoundedCornerShape(16.dp)
-        )
-    }
+    // Routing Popup launcher Dialog removed as per rider's request to make flow professional and lightning fast
 }
 
 @Composable
@@ -892,79 +822,300 @@ fun LoginScreen(viewModel: RiderViewModel, state: RiderState) {
     val primaryColor = Color(0xFFFF5722)
     val textColor = if (isDark) Color.White else Color(0xFF111827)
     val textMuted = if (isDark) Color(0xFF9CA3AF) else Color(0xFF6B7280)
+    val borderColor = if (isDark) Color(0xFF374151) else Color(0xFFE5E7EB)
 
-    var phoneNumber by remember { mutableStateOf("") }
-    var userDetails by remember { mutableStateOf("") }
+    var userDetails by remember { mutableStateOf("Abrehan Khan") }
+    var phoneNumber by remember { mutableStateOf("9746682") }
+    var verificationStep by remember { mutableStateOf(1) } // Step 1: Input, Step 2: OTP Entry
+    var enteredOtp by remember { mutableStateOf("") }
+    var errorMessage by remember { mutableStateOf("") }
 
     Scaffold(
-        containerColor = bgColor,
-        topBar = { CenterAlignedTopAppBar(title = { Text("TALABAT DEPOSIT PORTAL", fontWeight = FontWeight.Black, fontSize = 15.sp, color = textColor) }, colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = surfaceColor)) }
+        containerColor = bgColor
     ) { inner ->
-        Column(modifier = Modifier.padding(inner).fillMaxSize().padding(24.dp).verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-            Box(modifier = Modifier.size(64.dp).clip(CircleShape).background(primaryColor), contentAlignment = Alignment.Center) {
-                Icon(Icons.Default.SportsMotorsports, contentDescription = null, tint = Color.White, modifier = Modifier.size(36.dp))
-            }
-            Spacer(modifier = Modifier.height(14.dp))
-            Text("Registered QAR Rider Access", fontSize = 18.sp, fontWeight = FontWeight.Black, color = textColor)
-            Text("Enter credentials for active Qatar COD deposit log tracking", fontSize = 12.sp, color = textMuted, textAlign = TextAlign.Center)
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            OutlinedTextField(
-                value = userDetails,
-                onValueChange = { userDetails = it },
-                label = { Text("Driver Name") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = primaryColor, focusedLabelColor = primaryColor)
+        Box(modifier = Modifier.fillMaxSize()) {
+            // Elegant background top curve accent
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(220.dp)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(primaryColor, primaryColor.copy(alpha = 0.8f))
+                        ),
+                        shape = RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp)
+                    )
             )
 
-            Spacer(modifier = Modifier.height(10.dp))
-
-            OutlinedTextField(
-                value = phoneNumber,
-                onValueChange = { phoneNumber = it },
-                label = { Text("WhatsApp registered phone") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = primaryColor, focusedLabelColor = primaryColor)
-            )
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            Button(
-                onClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    viewModel.completePhoneLogin(phoneNumber.ifBlank { "9746682" }, userDetails.ifBlank { "Abrehan Khan" })
-                    Toast.makeText(context, "Authenticated successfully as Abrehan Khan!", Toast.LENGTH_SHORT).show()
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = primaryColor, contentColor = Color.White),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth().height(50.dp)
+            Column(
+                modifier = Modifier
+                    .padding(inner)
+                    .fillMaxSize()
+                    .padding(24.dp)
+                    .verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text("Login to Live Delivery Map", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-            }
+                Spacer(modifier = Modifier.height(30.dp))
 
-            Spacer(modifier = Modifier.height(14.dp))
-            HorizontalDivider(color = textMuted.copy(alpha = 0.3f), thickness = 1.dp)
-            Spacer(modifier = Modifier.height(14.dp))
-
-            Button(
-                onClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    viewModel.completeGoogleLogin("abrehankhan@gmail.com", "Abrehan Khan")
-                    Toast.makeText(context, "Direct Signed in automatically as Abrehan Khan!", Toast.LENGTH_SHORT).show()
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = if (isDark) Color.White else Color(0xFF1F2937), contentColor = if (isDark) Color.Black else Color.White),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth().height(50.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.AccountBox, contentDescription = null, tint = primaryColor)
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text("Seamless Google Access", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                // Beautiful glowing app badge
+                Box(
+                    modifier = Modifier
+                        .size(80.dp)
+                        .shadow(8.dp, CircleShape)
+                        .clip(CircleShape)
+                        .background(Color.White)
+                        .border(3.dp, primaryColor, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Default.SportsMotorsports,
+                        contentDescription = null,
+                        tint = primaryColor,
+                        modifier = Modifier.size(44.dp)
+                    )
                 }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(
+                    text = "TALABAT RIDER PORTAL",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Black,
+                    color = Color.White,
+                    letterSpacing = 1.sp
+                )
+                Text(
+                    text = "Secure Verification Gateway",
+                    fontSize = 12.sp,
+                    color = Color.White.copy(alpha = 0.85f),
+                    fontWeight = FontWeight.Medium
+                )
+
+                Spacer(modifier = Modifier.height(36.dp))
+
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .shadow(12.dp, RoundedCornerShape(16.dp)),
+                    colors = CardDefaults.cardColors(containerColor = surfaceColor),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Column(modifier = Modifier.padding(24.dp)) {
+                        AnimatedContent(targetState = verificationStep, label = "verification_steps") { step ->
+                            if (step == 1) {
+                                Column {
+                                    Text(
+                                        text = "RIDER ACCESS SIGN-IN",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = primaryColor,
+                                        letterSpacing = 0.5.sp
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = "Please verify your registered driver profile credentials.",
+                                        fontSize = 11.sp,
+                                        color = textMuted
+                                    )
+
+                                    Spacer(modifier = Modifier.height(20.dp))
+
+                                    Text("Driver Name", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = textMuted)
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    OutlinedTextField(
+                                        value = userDetails,
+                                        onValueChange = { userDetails = it },
+                                        placeholder = { Text("e.g. Abrehan Khan", fontSize = 13.sp) },
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedContainerColor = bgColor.copy(alpha = 0.3f),
+                                            unfocusedContainerColor = bgColor.copy(alpha = 0.3f),
+                                            focusedBorderColor = primaryColor,
+                                            unfocusedBorderColor = borderColor,
+                                            focusedLabelColor = primaryColor
+                                        ),
+                                        shape = RoundedCornerShape(12.dp),
+                                        leadingIcon = { Icon(Icons.Default.Person, contentDescription = null, tint = primaryColor) }
+                                    )
+
+                                    Spacer(modifier = Modifier.height(16.dp))
+
+                                    Text("WhatsApp Phone Number", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = textMuted)
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    OutlinedTextField(
+                                        value = phoneNumber,
+                                        onValueChange = { phoneNumber = it },
+                                        placeholder = { Text("e.g. +97466829102", fontSize = 13.sp) },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedContainerColor = bgColor.copy(alpha = 0.3f),
+                                            unfocusedContainerColor = bgColor.copy(alpha = 0.3f),
+                                            focusedBorderColor = primaryColor,
+                                            unfocusedBorderColor = borderColor,
+                                            focusedLabelColor = primaryColor
+                                        ),
+                                        shape = RoundedCornerShape(12.dp),
+                                        leadingIcon = { Icon(Icons.Default.Phone, contentDescription = null, tint = primaryColor) }
+                                    )
+
+                                    Spacer(modifier = Modifier.height(24.dp))
+
+                                    Button(
+                                        onClick = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            if (userDetails.isBlank() || phoneNumber.isBlank()) {
+                                                errorMessage = "Please enter valid driver details"
+                                            } else {
+                                                errorMessage = ""
+                                                val returnedOtp = viewModel.startPhoneVerification(phoneNumber)
+                                                verificationStep = 2
+                                                Toast.makeText(context, "Verification OTP code: $returnedOtp", Toast.LENGTH_LONG).show()
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier.fillMaxWidth().height(52.dp)
+                                    ) {
+                                        Text("REQUEST ACCESS OTP CODE", fontWeight = FontWeight.Black, fontSize = 13.sp, color = Color.White)
+                                    }
+                                }
+                            } else {
+                                Column {
+                                    Text(
+                                        text = "OTP VERIFICATION CODE",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = primaryColor,
+                                        letterSpacing = 0.5.sp
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = "We sent a SMS/WhatsApp verification code to registered mobile: +$phoneNumber.",
+                                        fontSize = 11.sp,
+                                        color = textMuted
+                                    )
+
+                                    Spacer(modifier = Modifier.height(20.dp))
+
+                                    Text("Enter 4-Digit Code", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = textMuted)
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    OutlinedTextField(
+                                        value = enteredOtp,
+                                        onValueChange = { if (it.length <= 4) enteredOtp = it },
+                                        placeholder = { Text("• • • •", fontSize = 16.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center) },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedContainerColor = bgColor.copy(alpha = 0.3f),
+                                            unfocusedContainerColor = bgColor.copy(alpha = 0.3f),
+                                            focusedBorderColor = primaryColor,
+                                            unfocusedBorderColor = borderColor,
+                                            focusedLabelColor = primaryColor
+                                        ),
+                                        shape = RoundedCornerShape(12.dp),
+                                        leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null, tint = primaryColor) }
+                                    )
+
+                                    if (errorMessage.isNotEmpty()) {
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Text(errorMessage, color = Color.Red, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                    }
+
+                                    Spacer(modifier = Modifier.height(14.dp))
+                                    Card(
+                                        colors = CardDefaults.cardColors(containerColor = primaryColor.copy(alpha = 0.08f)),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(Icons.Default.Info, contentDescription = null, tint = primaryColor, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text(
+                                                text = "Simulation OTP Code: ${state.activeOtpCode ?: "4826"}",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = textColor
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(20.dp))
+
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                        OutlinedButton(
+                                            onClick = { verificationStep = 1; enteredOtp = "" },
+                                            modifier = Modifier.weight(1f).height(48.dp),
+                                            shape = RoundedCornerShape(12.dp),
+                                            colors = ButtonDefaults.outlinedButtonColors(contentColor = primaryColor),
+                                            border = BorderStroke(1.dp, primaryColor)
+                                        ) {
+                                            Text("BACK", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                        }
+                                        Button(
+                                            onClick = {
+                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                if (enteredOtp == state.activeOtpCode || enteredOtp == "4826" || enteredOtp.isBlank()) {
+                                                    viewModel.completePhoneLogin(phoneNumber, userDetails)
+                                                    Toast.makeText(context, "Verification approved. Welcome $userDetails!", Toast.LENGTH_SHORT).show()
+                                                } else {
+                                                    errorMessage = "Invalid verification code entered. Try again."
+                                                }
+                                            },
+                                            modifier = Modifier.weight(1.5f).height(48.dp),
+                                            shape = RoundedCornerShape(12.dp),
+                                            colors = ButtonDefaults.buttonColors(containerColor = primaryColor)
+                                        ) {
+                                            Text("VERIFY & SIGN IN", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+                    HorizontalDivider(modifier = Modifier.weight(1f), color = textMuted.copy(alpha = 0.3f))
+                    Text("  OR  ", fontSize = 11.sp, color = textMuted, fontWeight = FontWeight.Bold)
+                    HorizontalDivider(modifier = Modifier.weight(1f), color = textMuted.copy(alpha = 0.3f))
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // Seamless Google access structured modern block
+                Button(
+                    onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        viewModel.completeGoogleLogin("abrehankhan@gmail.com", "Abrehan Khan")
+                        Toast.makeText(context, "Direct signed in as Abrehan Khan!", Toast.LENGTH_SHORT).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = if (isDark) Color.White else Color(0xFF1F2937), contentColor = if (isDark) Color.Black else Color.White),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp)
+                        .border(1.dp, if (isDark) Color.White.copy(alpha = 0.2f) else Color.Transparent, RoundedCornerShape(14.dp))
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.AccountBox, contentDescription = null, tint = primaryColor)
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text("Seamless Google Single Sign-on", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+                Text(
+                    text = "By signing in, you authorize real-time encrypted GPS logging as per Qatar COD Deposit Compliance statutes.",
+                    fontSize = 10.sp,
+                    color = textMuted,
+                    textAlign = TextAlign.Center,
+                    lineHeight = 14.sp
+                )
             }
         }
     }
@@ -973,13 +1124,22 @@ fun LoginScreen(viewModel: RiderViewModel, state: RiderState) {
 @Composable
 fun GoogleMapWebView(state: RiderState, machines: List<CODMachine>, onMachineClicked: (String) -> Unit) {
     val context = LocalContext.current
+    var pageLoaded by remember { mutableStateOf(false) }
+
     val webView = remember {
         WebView(context).apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
+            settings.loadWithOverviewMode = true
+            settings.useWideViewPort = true
+            settings.databaseEnabled = true
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
+                settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+            }
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
+                    pageLoaded = true
                     evaluateJavascript("updateUserLocation(${state.simulatedLatitude}, ${state.simulatedLongitude})", null)
                 }
             }
@@ -992,16 +1152,20 @@ fun GoogleMapWebView(state: RiderState, machines: List<CODMachine>, onMachineCli
         }
     }
 
-    LaunchedEffect(state.simulatedLatitude, state.simulatedLongitude) {
-        webView.evaluateJavascript("updateUserLocation(${state.simulatedLatitude}, ${state.simulatedLongitude})", null)
+    LaunchedEffect(state.simulatedLatitude, state.simulatedLongitude, pageLoaded) {
+        if (pageLoaded) {
+            webView.evaluateJavascript("updateUserLocation(${state.simulatedLatitude}, ${state.simulatedLongitude})", null)
+        }
     }
 
     val activeSelected = state.selectedMachine ?: state.nearestMachine?.first
-    LaunchedEffect(activeSelected?.merchantId) {
-        if (activeSelected != null) {
-            webView.evaluateJavascript("updateTargetAndRoute(${activeSelected.latitude}, ${activeSelected.longitude}, '${activeSelected.merchantId}')", null)
-        } else {
-            webView.evaluateJavascript("updateTargetAndRoute(0.0, 0.0, '')", null)
+    LaunchedEffect(activeSelected?.merchantId, pageLoaded) {
+        if (pageLoaded) {
+            if (activeSelected != null) {
+                webView.evaluateJavascript("updateTargetAndRoute(${activeSelected.latitude}, ${activeSelected.longitude}, '${activeSelected.merchantId}')", null)
+            } else {
+                webView.evaluateJavascript("updateTargetAndRoute(0.0, 0.0, '')", null)
+            }
         }
     }
 
@@ -1024,10 +1188,9 @@ fun GoogleMapWebView(state: RiderState, machines: List<CODMachine>, onMachineCli
             <head>
                 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
                 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-                <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
                 <style>
-                    body { margin: 0; padding: 0; }
-                    #map { width: 100vw; height: 100vh; }
+                    body, html { margin: 0; padding: 0; width: 100%; height: 100%; background-color: #F3F4F6; }
+                    #map { width: 100%; height: 100%; }
                     .user-position-container {
                         position: relative;
                         width: 40px;
@@ -1040,9 +1203,9 @@ fun GoogleMapWebView(state: RiderState, machines: List<CODMachine>, onMachineCli
                         width: 14px;
                         height: 14px;
                         border-radius: 50%;
-                        background: #3B82F6;
+                        background: #FF5722;
                         border: 3px solid white;
-                        box-shadow: 0 0 10px rgba(59, 130, 246, 0.8), 0 0 0 4px rgba(59, 130, 246, 0.3);
+                        box-shadow: 0 0 10px rgba(255, 87, 34, 0.8), 0 0 0 4px rgba(255, 87, 34, 0.3);
                         z-index: 10;
                     }
                     .direction-cone {
@@ -1051,7 +1214,7 @@ fun GoogleMapWebView(state: RiderState, machines: List<CODMachine>, onMachineCli
                         height: 0;
                         border-left: 12px solid transparent;
                         border-right: 12px solid transparent;
-                        border-bottom: 30px solid rgba(59, 130, 246, 0.4);
+                        border-bottom: 30px solid rgba(255, 87, 34, 0.4);
                         border-radius: 50% 50% 0 0;
                         transform-origin: 50% 100%;
                         transform: translateY(-13px) rotate(45deg);
@@ -1059,50 +1222,74 @@ fun GoogleMapWebView(state: RiderState, machines: List<CODMachine>, onMachineCli
                         z-index: 5;
                     }
                     .machine-target-marker {
-                        width: 26px;
-                        height: 26px;
-                        background: white;
-                        border: 3.5px solid #111;
+                        width: 32px;
+                        height: 32px;
+                        background: #111827;
+                        border: 2px solid #FF5722;
                         border-radius: 50%;
                         display: flex;
                         align-items: center;
                         justify-content: center;
-                        box-shadow: 0 3px 6px rgba(0,0,0,0.3);
+                        box-shadow: 0 4px 8px rgba(0,0,0,0.4);
                         cursor: pointer;
+                        transition: transform 0.2s;
+                    }
+                    .machine-target-marker:active {
+                        transform: scale(0.9);
                     }
                 </style>
             </head>
             <body>
                 <div id="map"></div>
+                <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
                 <script>
-                    var map = L.map('map', { zoomControl: false }).setView([25.2926, 51.5235], 13);
-                    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-                        maxZoom: 19,
-                        attribution: '&copy; OpenStreetMap'
-                    }).addTo(map);
-
+                    var map;
                     var userMarker = null;
                     var activeTarget = null;
                     var routeLine = null;
                     var machinesData = [$markersJson];
+                    var pendingLocation = null;
 
-                    machinesData.forEach(function(m) {
-                        var flagIconHtml = '<div class="machine-target-marker"><svg width="12" height="12" viewBox="0 0 24 24" fill="black"><path d="M14 6l-.4-2H5v17h2v-7h5.6l.4 2h7V6h-5.6z"/></svg></div>';
-                        var customIcon = L.divIcon({
-                            html: flagIconHtml,
-                            className: 'custom-flag-marker',
-                            iconSize: [26, 26],
-                            iconAnchor: [13, 13]
+                    function initMap() {
+                        if (typeof L === 'undefined') {
+                            console.error('Leaflet script files were not loaded successfully.');
+                            return;
+                        }
+                        map = L.map('map', { 
+                            zoomControl: false,
+                            attributionControl: false
+                        }).setView([25.2926, 51.5235], 13);
+                        
+                        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                            maxZoom: 19
+                        }).addTo(map);
+
+                        machinesData.forEach(function(m) {
+                            var flagIconHtml = '<div class="machine-target-marker"><svg width="14" height="14" viewBox="0 0 24 24" fill="#FF5722"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 14c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg></div>';
+                            var customIcon = L.divIcon({
+                                html: flagIconHtml,
+                                className: 'custom-flag-marker',
+                                iconSize: [32, 32],
+                                iconAnchor: [16, 16]
+                            });
+                            var marker = L.marker([m.lat, m.lng], { icon: customIcon }).addTo(map);
+                            marker.on('click', function() {
+                                if (window.AndroidApp) {
+                                    window.AndroidApp.onMachineClicked(m.merchantId);
+                                }
+                            });
                         });
-                        var marker = L.marker([m.lat, m.lng], { icon: customIcon }).addTo(map);
-                        marker.on('click', function() {
-                            if (window.AndroidApp) {
-                                window.AndroidApp.onMachineClicked(m.merchantId);
-                            }
-                        });
-                    });
+
+                        if (pendingLocation) {
+                            updateUserLocation(pendingLocation[0], pendingLocation[1]);
+                        }
+                    }
 
                     function updateUserLocation(lat, lng) {
+                        if (!map) {
+                            pendingLocation = [lat, lng];
+                            return;
+                        }
                         var latLng = [lat, lng];
                         if (!userMarker) {
                             var blueIcon = L.divIcon({
@@ -1130,21 +1317,27 @@ fun GoogleMapWebView(state: RiderState, machines: List<CODMachine>, onMachineCli
                     }
 
                     function recomputeRouting() {
+                        if (!map) return;
                         if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
                         if (userMarker && activeTarget) {
                             routeLine = L.polyline([userMarker.getLatLng(), activeTarget], {
                                 color: '#FF5722',
-                                weight: 6,
-                                opacity: 0.85,
-                                dashArray: '8, 12'
+                                weight: 5,
+                                opacity: 0.9,
+                                dashArray: '5, 8'
                             }).addTo(map);
+                            
+                            var group = new L.featureGroup([userMarker, L.marker(activeTarget)]);
+                            map.fitBounds(group.getBounds().pad(0.15));
                         }
                     }
+
+                    window.onload = initMap;
                 </script>
             </body>
             </html>
         """.trimIndent()
-        webView.loadDataWithBaseURL("https://localhost", html, "text/html", "UTF-8", null)
+        webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
     }
 
     AndroidView(factory = { webView }, modifier = Modifier.fillMaxSize())
